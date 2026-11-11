@@ -1,0 +1,845 @@
+\documentclass[11pt,a4paper]{article}
+
+% ---------------------------------------------------------------------------
+% Packages
+% ---------------------------------------------------------------------------
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage{lmodern}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{microtype}
+\usepackage{amsmath,amssymb,bm}
+\usepackage{booktabs,tabularx,array}
+\usepackage{enumitem}
+\usepackage{xcolor}
+\usepackage{listings}
+\usepackage[round]{natbib}
+\usepackage[colorlinks=true,linkcolor=blue!60!black,citecolor=blue!60!black,urlcolor=blue!60!black]{hyperref}
+
+% ---------------------------------------------------------------------------
+% Macros
+% ---------------------------------------------------------------------------
+\DeclareMathOperator*{\argmin}{arg\,min}
+\newcommand{\ACOR}{ACO\textsubscript{$\mathbb{R}$}}
+\newcommand{\vect}[1]{\mathbf{#1}}
+
+% Symbol-definition table used after each formulation
+\newenvironment{symtable}
+  {\par\medskip\noindent\small
+   \tabularx{\linewidth}{@{}l>{\raggedright\arraybackslash}X@{}}
+   \toprule
+   \textbf{Symbol} & \textbf{Definition} \\
+   \midrule}
+  {\bottomrule\endtabularx\par\medskip}
+
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+
+% Python listings
+\lstset{
+  language=Python,
+  basicstyle=\ttfamily\small,
+  keywordstyle=\color{blue!60!black}\bfseries,
+  commentstyle=\color{green!40!black}\itshape,
+  stringstyle=\color{red!50!black},
+  showstringspaces=false,
+  columns=fullflexible,
+  keepspaces=true,
+  breaklines=true,
+  frame=single,
+  rulecolor=\color{black!25},
+  backgroundcolor=\color{black!3},
+  xleftmargin=0.5em,
+  xrightmargin=0.5em,
+  aboveskip=0.8em,
+  belowskip=0.8em
+}
+
+\setlist{itemsep=0.25em}
+
+% ---------------------------------------------------------------------------
+% Title
+% ---------------------------------------------------------------------------
+\title{Learning from Nature: Nature-Inspired Metaheuristics\\for Machine Learning}
+\author{Percival Phakathi}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\begin{quote}
+\centering\itshape
+``Go to the ant, O sluggard; consider her ways, and be wise.''\\[0.25em]
+\upshape --- Proverbs 6:6
+\end{quote}
+
+\begin{abstract}
+\noindent Many of the optimisation problems that arise when building machine learning (ML) systems cannot be solved by gradient descent. Examples include tuning hyperparameters, selecting features, searching neural architectures and choosing ensemble members. In these problems the objective is often non-differentiable, noisy, discrete or expensive to evaluate. Nature-inspired metaheuristics are population-based, derivative-free search methods modelled on the collective behaviour of animals, and they offer a practical alternative. This article reviews five of them from an ML perspective: the Firefly Algorithm (FA), the Bat Algorithm (BA), Ant Colony Optimisation (ACO), Particle Swarm Optimisation (PSO) and the Shuffled Frog Leaping Algorithm (SFLA). For each algorithm we:
+\begin{itemize}
+  \item state its mathematical formulation and define every symbol
+  \item give its binary or discrete variant where one is needed for ML tasks
+  \item survey its applications across the ML pipeline
+  \item show how to import a Python implementation
+\end{itemize}
+We then propose an experimental protocol for comparing metaheuristics fairly against standard ML baselines such as random search and Bayesian optimisation. We close with the limitations of the approach.
+
+\medskip
+\noindent\textbf{Keywords:} metaheuristics, swarm intelligence, hyperparameter optimisation, feature selection, neural architecture search, derivative-free optimisation
+\end{abstract}
+
+% ===========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Training a model by gradient descent solves only one of the optimisation problems in an ML project. Around it sit several \emph{outer} problems:
+\begin{itemize}
+  \item \textbf{Which hyperparameters?} For example, the regularisation strength $C$ and kernel width $\gamma$ of a support vector machine (SVM), or the learning rate and depth of a gradient-boosted ensemble.
+  \item \textbf{Which features?} Choosing a subset of $d$ features is a combinatorial problem with $2^d$ candidates.
+  \item \textbf{Which architecture?} The number of layers, the layer types and the connections between them.
+  \item \textbf{Which pipeline?} The ordering of preprocessing, feature engineering and model steps.
+\end{itemize}
+
+These problems share four properties that rule out gradient-based methods:
+\begin{enumerate}
+  \item The objective (usually cross-validated error) has no useful gradient.
+  \item The search space is often mixed: continuous, integer and categorical variables together.
+  \item Every evaluation requires training a model, so evaluations are expensive.
+  \item The landscape is frequently \emph{multimodal}: many quite different configurations perform almost equally well.
+\end{enumerate}
+
+Nature-inspired metaheuristics are well suited to this setting. They keep a \emph{population} of candidate solutions, which they evaluate only through the objective value. They update the population with stochastic rules modelled on animal behaviour and balance two forces: \emph{exploration} (searching new regions) and \emph{exploitation} (refining promising ones). They do not guarantee the global optimum, but they are flexible, easy to parallelise and need no assumptions about the shape of the objective.
+
+\paragraph{Organisation of the article.} Section~\ref{sec:prelim} expresses common ML tasks as optimisation problems and defines a shared Python objective. Sections~\ref{sec:fa}--\ref{sec:sfla} then cover the five algorithms in turn. Each of these sections gives the biological inspiration, the mathematical formulation with every symbol defined, the binary variant, applications in ML and a Python implementation. Each list of applications covers the general uses of the algorithm in the ML pipeline and ends with industry examples showing how an organisation could use it in practice:
+\begin{itemize}
+  \item \textbf{FA:} tuberculosis screening in healthcare and crop-yield forecasting in agriculture.
+  \item \textbf{BA:} day-ahead electricity demand forecasting in energy and store-level sales forecasting in retail.
+  \item \textbf{ACO:} explainable fraud rules in insurance and customer churn prediction in telecommunications.
+  \item \textbf{PSO:} card-fraud detection in banking and customer segmentation in retail and marketing.
+  \item \textbf{SFLA:} explainable credit scoring in banking and predictive maintenance in manufacturing.
+\end{itemize}
+Section~\ref{sec:summary} compares the five algorithms side by side, Section~\ref{sec:protocol} proposes an experimental protocol for fair comparisons, Section~\ref{sec:limitations} discusses limitations and Section~\ref{sec:conclusion} concludes.
+
+% ===========================================================================
+\section{Preliminaries: ML Problems as Optimisation Problems}
+\label{sec:prelim}
+
+\subsection{General formulation}
+
+Every problem in this article takes the form
+\begin{equation}
+  \vect{x}^{*} = \argmin_{\vect{x} \in \mathcal{X}} f(\vect{x}).
+\end{equation}
+
+\begin{symtable}
+$\vect{x}$ & A candidate solution (a vector of decision variables) \\
+$\mathcal{X}$ & The search space (box constraints, binary vectors or permutations) \\
+$f(\vect{x})$ & The objective, or \emph{fitness}, function to minimise \\
+$\vect{x}^{*}$ & The best solution \\
+\end{symtable}
+
+Maximisation problems are handled by minimising $-f$. Throughout, $N$ denotes the population size, $D$ the dimension of $\vect{x}$ and $t$ the iteration counter.
+
+\subsection{Hyperparameter optimisation (HPO)}
+\label{sec:hpo}
+
+\begin{equation}
+  \bm{\lambda}^{*} = \argmin_{\bm{\lambda} \in \Lambda} \;
+  \frac{1}{K} \sum_{k=1}^{K} \mathcal{L}\!\left( \mathcal{A}_{\bm{\lambda}}\big(\mathcal{D}^{(k)}_{\text{train}}\big),\; \mathcal{D}^{(k)}_{\text{val}} \right)
+\end{equation}
+
+\begin{symtable}
+$\bm{\lambda}$ & A hyperparameter configuration \\
+$\Lambda$ & The hyperparameter search space \\
+$\mathcal{A}_{\bm{\lambda}}$ & The learning algorithm run with hyperparameters $\bm{\lambda}$ \\
+$\mathcal{D}^{(k)}_{\text{train}}, \mathcal{D}^{(k)}_{\text{val}}$ & The training and validation sets of fold $k$ \\
+$K$ & The number of cross-validation folds \\
+$\mathcal{L}$ & The validation loss, for example $1 - \text{accuracy}$ or RMSE \\
+\end{symtable}
+
+Scale-type hyperparameters are searched on a logarithmic scale, $\lambda = 10^{x}$ with $x \in [x_{\min}, x_{\max}]$. Integer hyperparameters are obtained by rounding, $\lambda = \lfloor x \rceil$.
+
+\subsection{Feature selection}
+\label{sec:fs}
+
+A feature subset is encoded as a binary mask $\vect{s} \in \{0,1\}^{d}$, where $s_j = 1$ keeps feature $j$. A common fitness function trades error against subset size:
+\begin{equation}
+  F(\vect{s}) = \alpha \, \varepsilon(\vect{s}) + (1 - \alpha) \, \frac{\lVert \vect{s} \rVert_{1}}{d}.
+  \label{eq:fs-fitness}
+\end{equation}
+
+\begin{symtable}
+$\varepsilon(\vect{s})$ & The cross-validated error of a classifier trained on the selected features \\
+$\lVert \vect{s} \rVert_{1}$ & The number of selected features \\
+$d$ & The total number of features \\
+$\alpha \in [0,1]$ & The weight on error against compactness (typically 0.9--0.99) \\
+\end{symtable}
+
+\subsection{From continuous to binary: transfer functions}
+\label{sec:transfer}
+
+FA, BA, PSO and SFLA work in continuous space. For binary problems such as feature selection, each continuous component $v_j$ (a position or velocity) is mapped to a probability with a \emph{transfer function}, and the bit is then sampled \citep{mirjalili2013}:
+\begin{equation}
+  T_{S}(v_j) = \frac{1}{1 + e^{-v_j}}, \qquad
+  s_j =
+  \begin{cases}
+    1 & \text{if } r < T_{S}(v_j), \\
+    0 & \text{otherwise},
+  \end{cases}
+  \qquad r \sim U(0,1).
+\end{equation}
+$T_S$ is the \emph{S-shaped} (sigmoid) transfer function. A \emph{V-shaped} alternative, $T_V(v_j) = \lvert \tanh(v_j) \rvert$, flips the current bit with probability $T_V(v_j)$ instead of setting it.
+
+\subsection{Clustering and weight training}
+\label{sec:clustering}
+
+In centroid-based clustering, a candidate solution concatenates $K$ centroids $\bm{\mu}_1, \dots, \bm{\mu}_K$ and minimises the within-cluster sum of squares:
+\begin{equation}
+  J(\bm{\mu}_1, \dots, \bm{\mu}_K) = \sum_{i=1}^{n} \min_{k} \lVert \vect{x}_i - \bm{\mu}_k \rVert_2^{2}.
+  \label{eq:wcss}
+\end{equation}
+
+For neural network training without gradients, the candidate solution is the flattened weight vector $\vect{w}$:
+\begin{equation}
+  \vect{w}^{*} = \argmin_{\vect{w}} \; \frac{1}{n} \sum_{i=1}^{n} \ell\big(y_i, \, g(\vect{x}_i; \vect{w})\big).
+\end{equation}
+Here $g$ is the network, $\ell$ is the per-sample loss and $n$ is the number of training samples. This is practical only for small networks, because $D$ grows with the number of weights.
+
+\subsection{A shared objective function}
+\label{sec:objective}
+
+All five algorithms below can optimise the same Python objective. The example tunes an SVM on the Wisconsin breast cancer dataset, searching $\log_{10} C$ and $\log_{10} \gamma$:
+
+\begin{lstlisting}
+import numpy as np
+from sklearn.datasets import load_breast_cancer
+from sklearn.model_selection import cross_val_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from sklearn.svm import SVC
+
+X, y = load_breast_cancer(return_X_y=True)
+
+def objective(sol):
+    """sol = [log10(C), log10(gamma)]; returns the 5-fold CV error to minimise."""
+    C, gamma = 10 ** sol[0], 10 ** sol[1]
+    model = make_pipeline(StandardScaler(), SVC(C=C, gamma=gamma))
+    return 1 - cross_val_score(model, X, y, cv=5).mean()
+\end{lstlisting}
+
+With Mealpy (version 3.x), any of its optimisers is attached to this objective in a few lines:
+
+\begin{lstlisting}
+from mealpy import FloatVar, PSO
+
+problem = {"obj_func": objective, "bounds": FloatVar(lb=(-3, -5), ub=(3, 1)), "minmax": "min"}
+best = PSO.OriginalPSO(epoch=50, pop_size=20).solve(problem)
+print(best.solution, best.target.fitness)
+\end{lstlisting}
+
+% ===========================================================================
+\section{Firefly Algorithm (FA)}
+\label{sec:fa}
+
+\subsection{Biological inspiration}
+
+Fireflies (family \emph{Lampyridae}) produce rhythmic flashes of light to attract mates. A brighter flash attracts more mates, but light intensity falls with distance and is absorbed by the air, so attraction is local. \citet{yang2008,yang2009} abstracted this into an optimiser in which brightness encodes solution quality.
+
+\subsection{Mathematical formulation}
+
+The brightness of firefly $i$ is its fitness, $I_i \propto -f(\vect{x}_i)$ for minimisation. Attractiveness decays with distance:
+\begin{equation}
+  \beta(r_{ij}) = \beta_0 \, e^{-\gamma r_{ij}^{2}}, \qquad r_{ij} = \lVert \vect{x}_i - \vect{x}_j \rVert_2.
+\end{equation}
+If firefly $j$ is brighter than firefly $i$ ($I_j > I_i$), firefly $i$ moves toward it:
+\begin{equation}
+  \vect{x}_i^{t+1} = \vect{x}_i^{t} + \beta_0 \, e^{-\gamma r_{ij}^{2}} \left( \vect{x}_j^{t} - \vect{x}_i^{t} \right) + \alpha_t \, \bm{\epsilon}_i^{t}.
+\end{equation}
+The random step is usually reduced over time:
+\begin{equation}
+  \alpha_t = \alpha_0 \, \theta^{t}, \qquad 0 < \theta < 1.
+\end{equation}
+
+\begin{symtable}
+$\vect{x}_i^{t}$ & Position (candidate solution) of firefly $i$ at iteration $t$ \\
+$I_i$ & Brightness of firefly $i$, determined by its fitness \\
+$r_{ij}$ & Euclidean distance between fireflies $i$ and $j$ \\
+$\beta_0$ & Attractiveness at distance $r = 0$ (commonly 1) \\
+$\gamma$ & Light-absorption coefficient: controls how fast attraction fades with distance \\
+$\alpha_t$ & Randomisation (step-size) parameter at iteration $t$ \\
+$\alpha_0$ & Initial randomisation parameter \\
+$\theta$ & Decay rate of the randomisation parameter \\
+$\bm{\epsilon}_i^{t}$ & Random vector drawn from $U(-0.5, 0.5)^D$ or $\mathcal{N}(\vect{0}, \vect{I})$ \\
+\end{symtable}
+
+Two limiting cases explain the behaviour. As $\gamma \to 0$, attraction no longer fades with distance, and FA behaves like a fully connected swarm that converges on a single optimum. As $\gamma \to \infty$, attraction disappears, and FA becomes a random search. Intermediate values make the population split into sub-swarms, each settling on a different local optimum. This is why FA suits \emph{multimodal} problems.
+
+\subsection{Binary variant}
+
+For feature selection, the continuous update above produces a displacement $\Delta x_{ij}$ for each dimension $j$. That displacement is passed through the transfer function of Section~\ref{sec:transfer} to obtain the bit $s_{ij}$.
+
+\subsection{Applications in machine learning}
+
+\begin{enumerate}
+  \item \textbf{SVM hyperparameter tuning.} Search $(\log_{10} C, \log_{10}\gamma)$ to minimise cross-validated error. Several regions of this space often perform similarly, and FA can find more than one of them.
+  \item \textbf{Gradient-boosting tuning.} Search learning rate, maximum depth, subsample ratio and number of estimators for XGBoost or LightGBM. Integers are obtained by rounding.
+  \item \textbf{Wrapper feature selection.} Use binary FA with the fitness function $F(\vect{s})$ of Section~\ref{sec:fs}, for example on gene-expression data, where $d$ is in the thousands.
+  \item \textbf{Clustering.} Each firefly encodes $K$ centroids and minimises $J$ of Section~\ref{sec:clustering}. Alternatively, FA can provide initial centroids for $k$-means and reduce its sensitivity to initialisation.
+  \item \textbf{Training small neural networks.} Optimise the weight vector $\vect{w}$ of a shallow multilayer perceptron, which is useful when the loss is non-differentiable (for example, directly optimising F1).
+  \item \textbf{Diverse ensembles.} Because FA's sub-swarms settle on different optima, the best firefly of each sub-swarm can serve as a base learner. This gives an ensemble of accurate but diverse models.
+  \item \textbf{Image preprocessing.} Choose multilevel thresholds that maximise Otsu's between-class variance \citep{otsu1979} before segmentation or classification.
+  \item \textbf{Healthcare: tuberculosis screening from chest X-rays.} A screening programme could use FA to tune several image classifiers at once, keeping the best model from each sub-swarm. Where these diverse models disagree on an X-ray, the case is sent to a radiologist, so specialist time goes to the hardest cases.
+  \item \textbf{Agriculture: crop-yield forecasting.} A farming cooperative could use FA to choose which weather, soil and satellite-vegetation features a yield model uses and to tune its settings. Because FA returns several good configurations, the cooperative gets a range of forecasts rather than a single number, which helps with planning storage and sales.
+\end{enumerate}
+
+\subsection{Python}
+
+\begin{lstlisting}
+from mealpy import FloatVar, BinaryVar, FFA          # FFA.OriginalFFA (Mealpy 3.x)
+from niapy.algorithms.basic import FireflyAlgorithm  # NiaPy alternative
+\end{lstlisting}
+
+% ===========================================================================
+\section{Bat Algorithm (BA)}
+\label{sec:ba}
+
+\subsection{Biological inspiration}
+
+Microbats navigate and hunt by \emph{echolocation}: they emit ultrasonic pulses and interpret the returning echoes. While searching, the calls are loud and infrequent. As a bat closes in on prey, its calls become quieter and more frequent. \citet{yang2010} modelled this transition from broad search to precise pursuit.
+
+\subsection{Mathematical formulation}
+
+Each bat $i$ has a position $\vect{x}_i$, velocity $\vect{v}_i$, frequency $f_i$, loudness $A_i$ and pulse emission rate $r_i$. At each iteration:
+\begin{align}
+  f_i &= f_{\min} + \left( f_{\max} - f_{\min} \right) \beta, \qquad \beta \sim U(0,1), \\
+  \vect{v}_i^{t+1} &= \vect{v}_i^{t} + \left( \vect{x}_i^{t} - \vect{x}_{*} \right) f_i, \\
+  \vect{x}_i^{t+1} &= \vect{x}_i^{t} + \vect{v}_i^{t+1}.
+\end{align}
+With probability depending on the pulse rate (when $\text{rand} > r_i$), the bat also takes a \emph{local random walk} around the current best:
+\begin{equation}
+  \vect{x}_{\text{new}} = \vect{x}_{*} + \epsilon \, \bar{A}^{t}, \qquad \epsilon \sim U(-1, 1).
+\end{equation}
+The new solution is accepted if it improves the fitness and $\text{rand} < A_i$. When it is accepted, loudness and pulse rate are updated:
+\begin{equation}
+  A_i^{t+1} = \alpha \, A_i^{t}, \qquad r_i^{t+1} = r_i^{0} \left[ 1 - e^{-\gamma t} \right].
+\end{equation}
+
+\begin{symtable}
+$\vect{x}_i^{t}, \vect{v}_i^{t}$ & Position and velocity of bat $i$ at iteration $t$ \\
+$f_i$ & Pulse frequency of bat $i$; it scales the step toward the best bat \\
+$f_{\min}, f_{\max}$ & Frequency range (for example 0 and 2) \\
+$\beta$ & A uniform random number in $[0,1]$ \\
+$\vect{x}_{*}$ & Current global best solution \\
+$\bar{A}^{t}$ & Mean loudness of all bats at iteration $t$ \\
+$A_i$ & Loudness of bat $i$; high values mean exploration, and it decreases over time \\
+$r_i, r_i^{0}$ & Pulse emission rate of bat $i$ and its initial value; it increases over time \\
+$\alpha$ & Loudness decay constant, $0 < \alpha < 1$ (commonly 0.9) \\
+$\gamma$ & Pulse-rate growth constant, $\gamma > 0$ (commonly 0.9) \\
+\end{symtable}
+
+As $t \to \infty$, $A_i^{t} \to 0$ and $r_i^{t} \to r_i^{0}$. The search shifts automatically from exploration to exploitation, much like a built-in annealing schedule.
+
+\subsection{Binary variant}
+
+The Binary Bat Algorithm (BBA) of \citet{nakamura2012} keeps the velocity update above. It replaces the position update with a transfer function that converts each velocity component into a bit-flip probability, as in Section~\ref{sec:transfer}. BBA was proposed specifically for feature selection.
+
+\subsection{Applications in machine learning}
+
+\begin{enumerate}
+  \item \textbf{Wrapper feature selection.} Use BBA with $F(\vect{s})$ to choose a compact feature subset, for example selecting among the 30 morphological features of the Wisconsin breast cancer dataset.
+  \item \textbf{Hyperparameter tuning of deep networks.} Search learning rate (log scale), dropout rate, batch size and number of units. The decaying loudness suits expensive objectives, because later evaluations concentrate around the best configuration.
+  \item \textbf{Medical image segmentation.} Choose multilevel thresholds that maximise Otsu's variance or Kapur's entropy \citep{kapur1985}, as a preprocessing step for tumour detection.
+  \item \textbf{Training feedforward networks.} Search the weights and biases of small networks directly, avoiding local minima that gradient descent can fall into on small, noisy datasets.
+  \item \textbf{Clustering.} Use encoded centroids as in Section~\ref{sec:clustering}, with the local random walk refining cluster centres in later iterations.
+  \item \textbf{Class-imbalance handling.} Tune class weights or resampling ratios (for example the SMOTE oversampling ratio) to maximise recall or the area under the precision-recall curve on the minority class.
+  \item \textbf{Time-series forecasting.} Tune the look-back window and hyperparameters of LSTM or gradient-boosting forecasters.
+  \item \textbf{Energy: day-ahead electricity demand forecasting.} A utility such as Eskom could use BA to tune how many past hours and previous days a demand forecaster looks at, together with its model settings. More accurate day-ahead forecasts reduce both the risk of load shedding and the cost of keeping unneeded generation on standby.
+  \item \textbf{Retail: store-level sales forecasting.} A retailer could use BA to tune one forecaster per product category for replenishment, where better forecasts mean fewer stock-outs and less wasted stock.
+\end{enumerate}
+
+\subsection{Python}
+
+\begin{lstlisting}
+from mealpy import FloatVar, BinaryVar, BA      # BA.OriginalBA (Mealpy 3.x)
+from niapy.algorithms.basic import BatAlgorithm  # NiaPy alternative
+\end{lstlisting}
+
+% ===========================================================================
+\section{Ant Colony Optimisation (ACO)}
+\label{sec:aco}
+
+\subsection{Biological inspiration}
+
+Foraging ants deposit pheromone on the ground. Shorter paths between nest and food are travelled more often per unit time, so pheromone accumulates on them faster. Pheromone also evaporates, which gradually erases paths that are no longer used. Through this positive feedback, the colony converges on short paths without central control \citep{goss1989}. \citet{dorigo1992} turned this into ACO, originally for combinatorial problems on graphs.
+
+\subsection{Mathematical formulation (discrete ACO)}
+
+Solutions are built step by step on a construction graph. Ant $k$ at node $i$ moves to node $j$ with probability
+\begin{equation}
+  p_{ij}^{k} = \frac{\left[ \tau_{ij} \right]^{\alpha} \left[ \eta_{ij} \right]^{\beta}}{\sum_{l \in \mathcal{N}_i^{k}} \left[ \tau_{il} \right]^{\alpha} \left[ \eta_{il} \right]^{\beta}}, \qquad j \in \mathcal{N}_i^{k}.
+\end{equation}
+After all $m$ ants have built their solutions, pheromone evaporates and is then reinforced:
+\begin{equation}
+  \tau_{ij} \leftarrow (1 - \rho) \, \tau_{ij} + \sum_{k=1}^{m} \Delta \tau_{ij}^{k}, \qquad
+  \Delta \tau_{ij}^{k} =
+  \begin{cases}
+    Q / L_k & \text{if ant } k \text{ used edge } (i,j), \\
+    0 & \text{otherwise}.
+  \end{cases}
+\end{equation}
+
+\begin{symtable}
+$\tau_{ij}$ & Pheromone level on edge $(i,j)$: the colony's learned preference \\
+$\eta_{ij}$ & Heuristic desirability of edge $(i,j)$, known before the search (for example $1/d_{ij}$ in routing) \\
+$\alpha, \beta$ & Relative weights of pheromone and heuristic information \\
+$\mathcal{N}_i^{k}$ & Nodes still available to ant $k$ at node $i$ \\
+$\rho \in (0,1]$ & Evaporation rate, which prevents premature convergence \\
+$m$ & Number of ants \\
+$L_k$ & Cost of ant $k$'s solution (for example tour length or validation error) \\
+$Q$ & A positive constant scaling the pheromone deposit \\
+\end{symtable}
+
+\subsection{ACO for feature selection}
+\label{sec:aco-fs}
+
+Here the construction graph is the set of features, and an ant adds features one at a time. Feature $j$ is chosen with probability
+\begin{equation}
+  p_j = \frac{\tau_j^{\alpha} \, \eta_j^{\beta}}{\sum_{u \in \mathcal{U}} \tau_u^{\alpha} \, \eta_u^{\beta}}, \qquad \eta_j = I(X_j; Y),
+\end{equation}
+where $\mathcal{U}$ is the set of features not yet selected and $\eta_j$ is a \emph{filter} score, such as the mutual information between feature $X_j$ and the target $Y$. This is a natural hybrid: the filter score guides the ants, and the wrapper's cross-validated error determines the pheromone deposit.
+
+\subsection{\texorpdfstring{ACO for continuous domains (\ACOR)}{ACO for continuous domains (ACOR)}}
+
+\citet{socha2008} replaced the discrete pheromone table with an archive of $k$ good solutions $\vect{s}_1, \dots, \vect{s}_k$, sorted by quality. Dimension $i$ of a new solution is sampled from a Gaussian kernel:
+\begin{gather}
+  G^{i}(x) = \sum_{l=1}^{k} \omega_l \; \mathcal{N}\!\left( x; \, \mu_l^{i}, \, \sigma_l^{i} \right), \qquad \mu_l^{i} = s_l^{i}, \\
+  \omega_l = \frac{1}{q k \sqrt{2\pi}} \, e^{-\frac{(l-1)^2}{2 q^2 k^2}}, \qquad
+  \sigma_l^{i} = \xi \sum_{e=1}^{k} \frac{\lvert s_e^{i} - s_l^{i} \rvert}{k - 1}.
+\end{gather}
+
+\begin{symtable}
+$k$ & Size of the solution archive \\
+$\vect{s}_l$ & The $l$-th best solution in the archive \\
+$\omega_l$ & Weight of solution $l$; better-ranked solutions are sampled more often \\
+$q$ & Locality parameter: small $q$ favours the best solutions \\
+$\xi$ & Spread parameter, playing the role of the evaporation rate \\
+$\sigma_l^{i}$ & Standard deviation of the kernel around solution $l$ in dimension $i$ \\
+\end{symtable}
+
+\ACOR{} makes ACO applicable to continuous problems such as hyperparameter tuning and weight training.
+
+\subsection{Applications in machine learning}
+
+\begin{enumerate}
+  \item \textbf{Feature selection.} Use the graph construction of Section~\ref{sec:aco-fs}, guided by mutual information or chi-squared scores.
+  \item \textbf{Classification rule induction.} Ant-Miner \citep{parpinelli2002} builds interpretable IF--THEN rules, where each ant constructs a rule term by term. This is a useful approach when explainability matters.
+  \item \textbf{Neural architecture search.} Treat layer choices as nodes in a graph, so that each ant's path is a network architecture. DeepSwarm \citep{byla2019} applies this idea to convolutional networks.
+  \item \textbf{AutoML pipeline construction.} Each ant chooses a sequence of steps (imputer, then scaler, then feature transformer, then model), and the pheromone learns which sequences validate well.
+  \item \textbf{Bayesian network structure learning.} Ants add directed edges between variables, and the pheromone is reinforced by a scoring function such as the Bayesian information criterion (BIC).
+  \item \textbf{Hyperparameter tuning and weight training.} Use \ACOR{} for continuous search spaces.
+  \item \textbf{Clustering.} Assign data points to clusters as a labelling problem, with pheromone recording point--cluster affinities.
+  \item \textbf{Routing and scheduling in ML-driven operations.} For example, a demand model predicts delivery volumes and ACO plans the routes. This is the classic setting for ACO.
+  \item \textbf{Insurance: explainable fraud rules.} An insurer could use Ant-Miner to learn short IF--THEN rules that flag suspicious claims, such as a high-value claim made soon after a policy starts. Investigators can read and check each rule, which is much harder with a black-box model.
+  \item \textbf{Telecommunications: customer churn prediction.} A mobile operator could use ACO, guided by mutual-information scores, to pick a small set from the hundreds of usage, billing and network features it records. A leaner churn model is cheaper to run every day and makes it clearer to the retention team why a customer is at risk.
+\end{enumerate}
+
+\subsection{Python}
+
+\begin{lstlisting}
+from sko.ACA import ACA_TSP          # discrete ACO for permutations and routing (scikit-opt)
+from mealpy import FloatVar, ACOR    # ACOR.OriginalACOR, ACO for continuous domains (Mealpy 3.x)
+\end{lstlisting}
+
+% ===========================================================================
+\section{Particle Swarm Optimisation (PSO)}
+\label{sec:pso}
+
+\subsection{Biological inspiration}
+
+Bird flocks and fish schools show complex, coordinated movement that emerges from a few local rules: avoid collisions, align with nearby neighbours and stay close to the group \citep{reynolds1987}. \citet{kennedy1995} built on this social behaviour to create PSO. Each particle balances its own experience against the experience of the swarm.
+
+\subsection{Mathematical formulation}
+
+With the inertia weight introduced by \citet{shi1998}, each particle is updated as follows:
+\begin{align}
+  \vect{v}_i^{t+1} &= w \, \vect{v}_i^{t} + c_1 \vect{r}_1 \odot \left( \vect{p}_i - \vect{x}_i^{t} \right) + c_2 \vect{r}_2 \odot \left( \vect{g} - \vect{x}_i^{t} \right), \label{eq:pso-v} \\
+  \vect{x}_i^{t+1} &= \vect{x}_i^{t} + \vect{v}_i^{t+1}.
+\end{align}
+The inertia weight is often decreased linearly:
+\begin{equation}
+  w_t = w_{\max} - \left( w_{\max} - w_{\min} \right) \frac{t}{T}.
+\end{equation}
+
+\begin{symtable}
+$\vect{x}_i^{t}, \vect{v}_i^{t}$ & Position and velocity of particle $i$ at iteration $t$ \\
+$w$ & Inertia weight: how much of its previous velocity a particle keeps \\
+$w_{\max}, w_{\min}$ & Initial and final inertia (commonly 0.9 and 0.4) \\
+$T$ & Maximum number of iterations \\
+$c_1$ & Cognitive coefficient: the pull toward the particle's own best position \\
+$c_2$ & Social coefficient: the pull toward the swarm's best position \\
+$\vect{r}_1, \vect{r}_2$ & Random vectors with components drawn from $U(0,1)$ \\
+$\odot$ & Element-wise (Hadamard) product \\
+$\vect{p}_i$ & Personal best position found so far by particle $i$ \\
+$\vect{g}$ & Global best position found so far by the swarm \\
+\end{symtable}
+
+\paragraph{Constriction factor.} \citet{clerc2002} proposed an alternative that guarantees convergence for suitable parameters:
+\begin{gather}
+  \vect{v}_i^{t+1} = \chi \left[ \vect{v}_i^{t} + c_1 \vect{r}_1 \odot (\vect{p}_i - \vect{x}_i^{t}) + c_2 \vect{r}_2 \odot (\vect{g} - \vect{x}_i^{t}) \right], \\
+  \chi = \frac{2}{\left\lvert 2 - \varphi - \sqrt{\varphi^{2} - 4\varphi} \right\rvert}, \qquad \varphi = c_1 + c_2 > 4.
+\end{gather}
+With $c_1 = c_2 = 2.05$, this gives $\chi \approx 0.7298$.
+
+\subsection{Binary PSO}
+
+In the discrete binary version \citep{kennedy1997}, the velocity update is unchanged. Each bit is then resampled from the sigmoid of its velocity:
+\begin{equation}
+  s_{ij}^{t+1} =
+  \begin{cases}
+    1 & \text{if } r < \sigma\!\left( v_{ij}^{t+1} \right), \\
+    0 & \text{otherwise},
+  \end{cases}
+  \qquad \sigma(v) = \frac{1}{1 + e^{-v}}.
+\end{equation}
+Velocities are usually clamped to $[-V_{\max}, V_{\max}]$ (for example $V_{\max} = 4$) so that bits do not get stuck at 0 or 1.
+
+\subsection{Applications in machine learning}
+
+\begin{enumerate}
+  \item \textbf{Hyperparameter optimisation.} This is the most common use of PSO in ML. Typical targets are SVM $(C, \gamma)$, random forest depth and number of trees, and learning rate, regularisation and depth for gradient boosting.
+  \item \textbf{Feature selection.} Use binary PSO with $F(\vect{s})$, for example selecting TF-IDF features for text classification.
+  \item \textbf{Clustering.} Each particle encodes $K$ centroids and minimises quantisation error \citep{vandermerwe2003}. PSO can also seed $k$-means.
+  \item \textbf{Neural network weight training.} Train small networks without backpropagation, or use PSO to find a good starting point that gradient descent then refines.
+  \item \textbf{Neural architecture search.} Particles encode the number of layers, filters and kernel sizes of a convolutional network, with integer rounding.
+  \item \textbf{Ensemble weighting.} Particles encode the weights $\vect{w} \in \Delta^{M}$ (the probability simplex) of $M$ base models, maximising validation performance of the weighted average.
+  \item \textbf{Time-series forecasting.} Tune the look-back window, the number of LSTM units and the learning rate of a forecaster.
+  \item \textbf{Reinforcement learning.} Search policy parameters directly (direct policy search), treating episode return as the objective.
+  \item \textbf{Banking: card-fraud detection.} A bank could use PSO to weight several fraud models (for example gradient boosting, a neural network and rule-based scores) so that the combined score catches as much fraud as possible at a fixed false-alarm rate. Fewer false alarms means fewer genuine customers having their cards blocked.
+  \item \textbf{Retail and marketing: customer segmentation.} A retailer could use PSO-based clustering to group customers by spending patterns, with each particle encoding a set of cluster centres. Searching globally avoids the poor groupings that $k$-means can produce from a bad start, giving marketing teams more useful segments.
+\end{enumerate}
+
+\subsection{Python}
+
+\begin{lstlisting}
+import pyswarms as ps                 # ps.single.GlobalBestPSO, ps.discrete.BinaryPSO
+from mealpy import FloatVar, PSO      # PSO.OriginalPSO (Mealpy 3.x)
+\end{lstlisting}
+
+% ===========================================================================
+\section{Shuffled Frog Leaping Algorithm (SFLA)}
+\label{sec:sfla}
+
+\subsection{Biological inspiration}
+
+The metaphor is a population of frogs leaping between stones in a pond in search of the location with the most food. Frogs are organised into groups that share information internally, and groups periodically mix. \citet{eusuff2003} formalised this as a \emph{memetic} algorithm that combines local search within groups with global information exchange \citep[see also][]{eusuff2006}.
+
+\subsection{Mathematical formulation}
+
+\paragraph{Partitioning.} The $N$ frogs are sorted by fitness, best first, and dealt into $m$ memeplexes in turn: frog $k$ (in sorted order) joins memeplex $\big((k-1) \bmod m\big) + 1$. Each memeplex therefore contains $n = N/m$ frogs of mixed quality.
+
+\paragraph{Local search.} Within each memeplex, only the worst frog $\vect{X}_w$ moves. It leaps toward the memeplex's best frog $\vect{X}_b$:
+\begin{gather}
+  \vect{D} = r \left( \vect{X}_b - \vect{X}_w \right), \qquad r \sim U(0,1), \\
+  \vect{X}_w^{\text{new}} = \vect{X}_w + \vect{D}, \qquad -\vect{D}_{\max} \le \vect{D} \le \vect{D}_{\max}.
+\end{gather}
+If $\vect{X}_w^{\text{new}}$ is not better than $\vect{X}_w$, the leap is repeated with the global best frog $\vect{X}_g$ in place of $\vect{X}_b$. If that also fails, $\vect{X}_w$ is replaced by a randomly generated frog (the \emph{censorship} step). This is repeated $L$ times per memeplex.
+
+\paragraph{Shuffling.} All frogs are then pooled, re-sorted and redistributed into new memeplexes. The process continues until a stopping criterion is met.
+
+\begin{symtable}
+$N$ & Total number of frogs (population size) \\
+$m$ & Number of memeplexes (groups) \\
+$n = N/m$ & Number of frogs per memeplex \\
+$\vect{X}_b, \vect{X}_w$ & Best and worst frogs in the current memeplex \\
+$\vect{X}_g$ & Best frog in the whole population \\
+$\vect{D}$ & Leap vector: the change in position of the worst frog \\
+$\vect{D}_{\max}$ & Maximum leap allowed in each dimension \\
+$r$ & A uniform random number in $[0,1]$ \\
+$L$ & Number of local evolution steps per memeplex between shuffles \\
+\end{symtable}
+
+The memeplex structure is SFLA's distinguishing feature. Independent local searches preserve diversity, and shuffling spreads the best information across the population.
+
+\subsection{Binary variant}
+
+As with FA and PSO, the leap vector $\vect{D}$ is passed through a transfer function (Section~\ref{sec:transfer}) to update each bit of a binary solution. This yields binary SFLA for feature selection.
+
+\subsection{Applications in machine learning}
+
+\begin{enumerate}
+  \item \textbf{Hyperparameter tuning.} The memeplexes act as parallel, semi-independent searches, which suits configuration spaces with several promising regions.
+  \item \textbf{Feature selection.} Use binary SFLA with $F(\vect{s})$, particularly for high-dimensional problems where diversity matters.
+  \item \textbf{Clustering.} Use centroid encoding as in Section~\ref{sec:clustering}.
+  \item \textbf{Neural network training.} Use SFLA to optimise the weights of small networks or as a global initialiser before gradient-based fine-tuning.
+  \item \textbf{Ensemble and model selection.} Each frog encodes which base models to include and how to weight them.
+  \item \textbf{Distributed and federated search.} The memeplex structure maps naturally onto parallel workers. Each worker evolves one memeplex, and shuffling becomes a periodic synchronisation step.
+  \item \textbf{Traffic forecasting.} Tune the hyperparameters and look-back windows of models trained on road-sensor data.
+  \item \textbf{Banking: explainable credit scoring.} A lender could use SFLA to choose a small set of applicant features and tune the scoring model at the same time, excluding protected attributes such as sex and marital status. The result is a default-prediction model that stays accurate but is simple enough to explain to customers and regulators.
+  \item \textbf{Manufacturing: predictive maintenance.} A plant could use SFLA to select which of hundreds of machine sensors a failure-prediction model needs, cutting sensor and data costs while still warning engineers before breakdowns.
+\end{enumerate}
+
+\subsection{Python}
+
+No maintained SFLA implementation exists in Mealpy 3.0.3, NiaPy or PySwarms. The algorithm is short enough to implement directly with NumPy:
+
+\begin{lstlisting}
+import numpy as np
+
+def sfla(f, lb, ub, n_frogs=30, n_memeplexes=5, n_local=10, n_shuffles=50, d_max=None, seed=0):
+    """Minimise f over the box [lb, ub] with the Shuffled Frog Leaping Algorithm."""
+    rng = np.random.default_rng(seed)
+    lb, ub = np.asarray(lb, float), np.asarray(ub, float)
+    d_max = (ub - lb) if d_max is None else d_max
+    X = rng.uniform(lb, ub, (n_frogs, lb.size))
+    F = np.array([f(x) for x in X])
+    for _ in range(n_shuffles):
+        order = np.argsort(F)                              # shuffle: sort, best first
+        X, F = X[order], F[order]
+        g = X[0].copy()                                    # global best frog
+        for m in range(n_memeplexes):
+            idx = np.arange(m, n_frogs, n_memeplexes)      # frog k -> memeplex k mod m
+            for _ in range(n_local):
+                b, w = idx[np.argmin(F[idx])], idx[np.argmax(F[idx])]
+                for target in (X[b], g):                   # leap toward local, then global best
+                    D = np.clip(rng.random() * (target - X[w]), -d_max, d_max)
+                    cand = np.clip(X[w] + D, lb, ub)
+                    fc = f(cand)
+                    if fc < F[w]:
+                        X[w], F[w] = cand, fc
+                        break
+                else:                                      # censorship: random new frog
+                    X[w] = rng.uniform(lb, ub)
+                    F[w] = f(X[w])
+    best = np.argmin(F)
+    return X[best], F[best]
+
+# Example with the shared objective from Section 2.6:
+# best_x, best_err = sfla(objective, lb=[-3, -5], ub=[3, 1])
+\end{lstlisting}
+
+% ===========================================================================
+\section{Comparative Summary}
+\label{sec:summary}
+
+Table~\ref{tab:summary} compares the five algorithms.
+
+\begin{table}[htbp]
+\centering
+\footnotesize
+\caption{Comparison of the five metaheuristics.}
+\label{tab:summary}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}p{2.1cm}YYYYY@{}}
+\toprule
+ & \textbf{FA} & \textbf{BA} & \textbf{ACO} & \textbf{PSO} & \textbf{SFLA} \\
+\midrule
+\textbf{Native search space} & Continuous & Continuous & Discrete (graph); continuous via \ACOR & Continuous & Continuous \\
+\addlinespace
+\textbf{Main mechanism} & Distance-dependent attraction & Frequency-tuned velocity, loudness and pulse rate & Pheromone reinforcement and evaporation & Personal and social best attraction & Memeplex local search plus shuffling \\
+\addlinespace
+\textbf{Key parameters} & $\beta_0, \gamma, \alpha$ & $f_{\min}$, $f_{\max}$, $A^0$, $r^0$, $\alpha$, $\gamma$ & $\alpha$, $\beta$, $\rho$, $m$ & $w$, $c_1$, $c_2$ & $N$, $m$, $L$, $\vect{D}_{\max}$ \\
+\addlinespace
+\textbf{Strength} & Multimodal landscapes; finds several optima & Automatic shift from exploration to exploitation & Sequential and structural construction & Simple, fast, well studied & Preserves diversity; parallel-friendly \\
+\addlinespace
+\textbf{ML sweet spot} & Diverse ensembles, HPO & Expensive HPO, feature selection & Feature selection, rule induction, NAS, pipelines & HPO, ensemble weights, clustering & Parallel HPO, feature selection \\
+\addlinespace
+\textbf{Binary variant} & Transfer function & BBA \citep{nakamura2012} & Native & Binary PSO \citep{kennedy1997} & Transfer function \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+% ===========================================================================
+\section{Experimental Protocol for ML Studies}
+\label{sec:protocol}
+
+Comparing optimisers on ML problems is easy to do badly. We recommend the following protocol.
+\begin{enumerate}
+  \item \textbf{Equal evaluation budgets.} Compare algorithms at the same number of objective evaluations, $N_{\text{FE}} = N \times T$, not the same number of iterations. Each evaluation trains a model, so evaluations, not iterations, are the true cost.
+  \item \textbf{Strong baselines.} Always include random search \citep{bergstra2012} and Bayesian optimisation, for example via Optuna \citep{akiba2019} or Gaussian-process methods \citep{snoek2012}. A metaheuristic that does not beat random search at equal budget adds complexity for nothing.
+  \item \textbf{Nested cross-validation.} The inner loop is used by the optimiser and the outer loop estimates generalisation. Reporting the optimiser's own best validation score overstates performance, because the search overfits the validation folds.
+  \item \textbf{Multiple seeds.} Run each optimiser with at least 10--30 random seeds and report the mean, standard deviation and convergence curves.
+  \item \textbf{Statistical testing.} For comparisons across datasets, use the Wilcoxon signed-rank test for two methods, or the Friedman test with a post-hoc Nemenyi test for several \citep{demsar2006}.
+  \item \textbf{Report the search space.} List the bounds, scales (linear or logarithmic) and encodings of every hyperparameter, and every algorithm parameter used.
+\end{enumerate}
+
+% ===========================================================================
+\section{Limitations}
+\label{sec:limitations}
+
+\begin{enumerate}
+  \item \textbf{No free lunch.} Averaged over all possible problems, no optimiser outperforms any other \citep{wolpert1997}. The choice must follow the structure of the problem.
+  \item \textbf{Metaphor over mechanism.} Many ``novel'' metaheuristics are existing techniques with a new animal metaphor \citep{sorensen2015}. Algorithms should be judged by their search mechanism and by rigorous benchmarking.
+  \item \textbf{Sample efficiency.} Population-based methods typically need more evaluations than model-based methods such as Bayesian optimisation. This matters when each evaluation trains a deep network.
+  \item \textbf{Parameter sensitivity.} Each metaheuristic has its own parameters, so tuning the tuner can become a problem in its own right.
+  \item \textbf{No optimality guarantees.} The returned solution is good, not provably optimal. Convergence proofs exist only under restrictive assumptions.
+  \item \textbf{Scalability.} Weight training with metaheuristics becomes impractical as the number of weights grows. Gradient methods remain superior for large networks.
+\end{enumerate}
+
+% ===========================================================================
+\section{Conclusion}
+\label{sec:conclusion}
+
+Fireflies, bats, ants, birds and frogs each embody a different strategy for searching a large space without central control. Translated into algorithms, these strategies give ML practitioners useful tools for the problems gradient descent cannot reach: hyperparameter optimisation, feature selection, architecture and pipeline search, clustering and ensemble construction. Their value is greatest when the objective is non-differentiable, the search space is mixed or discrete, and the landscape has many good regions. Used with an equal-budget, multi-seed protocol and honest baselines, these methods are a sound complement to the modern ML toolkit.
+
+% ===========================================================================
+% References
+% ===========================================================================
+\begin{thebibliography}{99}
+\small
+
+\bibitem[Akiba et~al.(2019)Akiba, Sano, Yanase, Ohta, and Koyama]{akiba2019}
+Akiba, T., Sano, S., Yanase, T., Ohta, T., \& Koyama, M. (2019).
+Optuna: A next-generation hyperparameter optimization framework.
+In \emph{Proceedings of the 25th ACM SIGKDD International Conference on Knowledge Discovery \& Data Mining}, pp.~2623--2631.
+
+\bibitem[Bergstra and Bengio(2012)]{bergstra2012}
+Bergstra, J., \& Bengio, Y. (2012).
+Random search for hyper-parameter optimization.
+\emph{Journal of Machine Learning Research, 13}, 281--305.
+
+\bibitem[Byla and Pang(2019)]{byla2019}
+Byla, E., \& Pang, W. (2019).
+DeepSwarm: Optimising convolutional neural networks using swarm intelligence.
+In \emph{Advances in Computational Intelligence Systems (UKCI 2019)}. arXiv:1905.07350.
+
+\bibitem[Clerc and Kennedy(2002)]{clerc2002}
+Clerc, M., \& Kennedy, J. (2002).
+The particle swarm: Explosion, stability, and convergence in a multidimensional complex space.
+\emph{IEEE Transactions on Evolutionary Computation, 6}(1), 58--73.
+
+\bibitem[Dem{\v{s}}ar(2006)]{demsar2006}
+Dem{\v{s}}ar, J. (2006).
+Statistical comparisons of classifiers over multiple data sets.
+\emph{Journal of Machine Learning Research, 7}, 1--30.
+
+\bibitem[Dorigo(1992)]{dorigo1992}
+Dorigo, M. (1992).
+\emph{Optimization, learning and natural algorithms} [Doctoral dissertation].
+Politecnico di Milano.
+
+\bibitem[Dorigo and Gambardella(1997)]{dorigo1997}
+Dorigo, M., \& Gambardella, L.~M. (1997).
+Ant colony system: A cooperative learning approach to the traveling salesman problem.
+\emph{IEEE Transactions on Evolutionary Computation, 1}(1), 53--66.
+
+\bibitem[Eusuff and Lansey(2003)]{eusuff2003}
+Eusuff, M.~M., \& Lansey, K.~E. (2003).
+Optimization of water distribution network design using the shuffled frog leaping algorithm.
+\emph{Journal of Water Resources Planning and Management, 129}(3), 210--225.
+
+\bibitem[Eusuff et~al.(2006)Eusuff, Lansey, and Pasha]{eusuff2006}
+Eusuff, M., Lansey, K., \& Pasha, F. (2006).
+Shuffled frog-leaping algorithm: A memetic meta-heuristic for discrete optimization.
+\emph{Engineering Optimization, 38}(2), 129--154.
+
+\bibitem[Goss et~al.(1989)Goss, Aron, Deneubourg, and Pasteels]{goss1989}
+Goss, S., Aron, S., Deneubourg, J.~L., \& Pasteels, J.~M. (1989).
+Self-organized shortcuts in the Argentine ant.
+\emph{Naturwissenschaften, 76}(12), 579--581.
+
+\bibitem[Kapur et~al.(1985)Kapur, Sahoo, and Wong]{kapur1985}
+Kapur, J.~N., Sahoo, P.~K., \& Wong, A.~K.~C. (1985).
+A new method for gray-level picture thresholding using the entropy of the histogram.
+\emph{Computer Vision, Graphics, and Image Processing, 29}(3), 273--285.
+
+\bibitem[Kennedy and Eberhart(1995)]{kennedy1995}
+Kennedy, J., \& Eberhart, R. (1995).
+Particle swarm optimization.
+In \emph{Proceedings of the IEEE International Conference on Neural Networks}, Vol.~4, pp.~1942--1948.
+
+\bibitem[Kennedy and Eberhart(1997)]{kennedy1997}
+Kennedy, J., \& Eberhart, R.~C. (1997).
+A discrete binary version of the particle swarm algorithm.
+In \emph{Proceedings of the IEEE International Conference on Systems, Man, and Cybernetics}, Vol.~5, pp.~4104--4108.
+
+\bibitem[Mirjalili and Lewis(2013)]{mirjalili2013}
+Mirjalili, S., \& Lewis, A. (2013).
+S-shaped versus V-shaped transfer functions for binary particle swarm optimization.
+\emph{Swarm and Evolutionary Computation, 9}, 1--14.
+
+\bibitem[Miranda(2018)]{miranda2018}
+Miranda, L.~J.~V. (2018).
+PySwarms: A research toolkit for particle swarm optimization in Python.
+\emph{Journal of Open Source Software, 3}(21), 433.
+
+\bibitem[Nakamura et~al.(2012)Nakamura, Pereira, Costa, Rodrigues, Papa, and Yang]{nakamura2012}
+Nakamura, R.~Y.~M., Pereira, L.~A.~M., Costa, K.~A., Rodrigues, D., Papa, J.~P., \& Yang, X.-S. (2012).
+BBA: A binary bat algorithm for feature selection.
+In \emph{Proceedings of the 25th SIBGRAPI Conference on Graphics, Patterns and Images}, pp.~291--297.
+
+\bibitem[Otsu(1979)]{otsu1979}
+Otsu, N. (1979).
+A threshold selection method from gray-level histograms.
+\emph{IEEE Transactions on Systems, Man, and Cybernetics, 9}(1), 62--66.
+
+\bibitem[Parpinelli et~al.(2002)Parpinelli, Lopes, and Freitas]{parpinelli2002}
+Parpinelli, R.~S., Lopes, H.~S., \& Freitas, A.~A. (2002).
+Data mining with an ant colony optimization algorithm.
+\emph{IEEE Transactions on Evolutionary Computation, 6}(4), 321--332.
+
+\bibitem[Pedregosa et~al.(2011)]{pedregosa2011}
+Pedregosa, F., et~al. (2011).
+Scikit-learn: Machine learning in Python.
+\emph{Journal of Machine Learning Research, 12}, 2825--2830.
+
+\bibitem[Reynolds(1987)]{reynolds1987}
+Reynolds, C.~W. (1987).
+Flocks, herds and schools: A distributed behavioral model.
+\emph{ACM SIGGRAPH Computer Graphics, 21}(4), 25--34.
+
+\bibitem[Shi and Eberhart(1998)]{shi1998}
+Shi, Y., \& Eberhart, R. (1998).
+A modified particle swarm optimizer.
+In \emph{Proceedings of the IEEE International Conference on Evolutionary Computation}, pp.~69--73.
+
+\bibitem[Snoek et~al.(2012)Snoek, Larochelle, and Adams]{snoek2012}
+Snoek, J., Larochelle, H., \& Adams, R.~P. (2012).
+Practical Bayesian optimization of machine learning algorithms.
+In \emph{Advances in Neural Information Processing Systems 25}, pp.~2951--2959.
+
+\bibitem[Socha and Dorigo(2008)]{socha2008}
+Socha, K., \& Dorigo, M. (2008).
+Ant colony optimization for continuous domains.
+\emph{European Journal of Operational Research, 185}(3), 1155--1173.
+
+\bibitem[S{\"o}rensen(2015)]{sorensen2015}
+S{\"o}rensen, K. (2015).
+Metaheuristics---the metaphor exposed.
+\emph{International Transactions in Operational Research, 22}(1), 3--18.
+
+\bibitem[{van der Merwe} and Engelbrecht(2003)]{vandermerwe2003}
+van der Merwe, D.~W., \& Engelbrecht, A.~P. (2003).
+Data clustering using particle swarm optimization.
+In \emph{Proceedings of the 2003 Congress on Evolutionary Computation (CEC '03)}, Vol.~1, pp.~215--220.
+
+\bibitem[{Van Thieu} and Mirjalili(2023)]{vanthieu2023}
+Van Thieu, N., \& Mirjalili, S. (2023).
+MEALPY: An open-source library for latest meta-heuristic algorithms in Python.
+\emph{Journal of Systems Architecture, 139}, 102871.
+
+\bibitem[Vrban{\v{c}}i{\v{c}} et~al.(2018)Vrban{\v{c}}i{\v{c}}, Brezo{\v{c}}nik, Mlakar, Fister, and Fister~Jr.]{vrbancic2018}
+Vrban{\v{c}}i{\v{c}}, G., Brezo{\v{c}}nik, L., Mlakar, U., Fister, D., \& Fister~Jr., I. (2018).
+NiaPy: Python microframework for building nature-inspired algorithms.
+\emph{Journal of Open Source Software, 3}(23), 613.
+
+\bibitem[Wolpert and Macready(1997)]{wolpert1997}
+Wolpert, D.~H., \& Macready, W.~G. (1997).
+No free lunch theorems for optimization.
+\emph{IEEE Transactions on Evolutionary Computation, 1}(1), 67--82.
+
+\bibitem[Yang(2008)]{yang2008}
+Yang, X.-S. (2008).
+\emph{Nature-inspired metaheuristic algorithms}.
+Luniver Press.
+
+\bibitem[Yang(2009)]{yang2009}
+Yang, X.-S. (2009).
+Firefly algorithms for multimodal optimization.
+In \emph{Stochastic Algorithms: Foundations and Applications (SAGA 2009)}, LNCS 5792, pp.~169--178. Springer.
+
+\bibitem[Yang(2010)]{yang2010}
+Yang, X.-S. (2010).
+A new metaheuristic bat-inspired algorithm.
+In \emph{Nature Inspired Cooperative Strategies for Optimization (NICSO 2010)}, Studies in Computational Intelligence 284, pp.~65--74. Springer.
+
+\end{thebibliography}
+
+\end{document}
